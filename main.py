@@ -182,7 +182,9 @@ def _print_new_version(path, target):
     elif Version(new_version) <= Version(version):
         raise ValueError("downgrade for {}.".format(pname))
 
-    print(f"{pname} {version} {new_version} {package_url}")
+    # buildPython{Application,Package} will prefix the drv name with ${python.executable}
+    # python3.7 is going to work for most applications.
+    print(f"python3.7-{pname} {version} {new_version} {package_url}")
 
 
 def _update(path, target):
