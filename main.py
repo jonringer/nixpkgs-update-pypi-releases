@@ -1,5 +1,5 @@
 #!/usr/bin/env nix-shell
-#!nix-shell -i python3 -p "python3.withPackages(ps: with ps; [ requests ])
+#!nix-shell -i python3 -p nix -p "python3.withPackages(ps: with ps; [ requests ])
 
 """
 This is used to create a manifest of updated python packages to be used by nixpkgs-updates
@@ -16,15 +16,20 @@ or
 """
 
 import argparse
+import collections
+import logging
 import os
 import re
 import requests
+import shlex
+import subprocess
+import sys
+
 from concurrent.futures import ThreadPoolExecutor as Pool
 from packaging.version import Version as _Version
 from packaging.version import InvalidVersion
 from packaging.specifiers import SpecifierSet
-import collections
-import subprocess
+
 
 INDEX = "https://pypi.io/pypi"
 """url of PyPI"""
@@ -36,9 +41,8 @@ EXTENSIONS = ['tar.gz', 'tar.bz2', 'tar', 'zip', '.whl']
 """Permitted file extensions. These are evaluated from left to right and the first occurance is returned."""
 
 PRERELEASES = False
+CACHE_HOME = os.environ.get("XDG_CACHE_HOME", os.environ.get("HOME", "."))
 
-import logging
-import sys
 logging.basicConfig(level=logging.INFO, stream=sys.stderr)
 
 
@@ -70,6 +74,7 @@ def _get_values(attribute, text):
     values = regex.findall(text)
     return values
 
+
 def _get_unique_value(attribute, text):
     """Match attribute in text and return unique match.
 
@@ -83,6 +88,7 @@ def _get_unique_value(attribute, text):
         return values[0]
     else:
         raise ValueError("no value found for {}".format(attribute))
+
 
 def _get_line_and_value(attribute, text):
     """Match attribute in text. Return the line and the value of the attribute."""
@@ -107,9 +113,9 @@ def _fetch_page(url):
 
 
 SEMVER = {
-    'major' : 0,
-    'minor' : 1,
-    'patch' : 2,
+    'major': 0,
+    'minor': 1,
+    'patch': 2,
 }
 
 
@@ -133,7 +139,7 @@ def _determine_latest_version(current_version, target, versions):
     if len(ceiling) == 0:
         ceiling = None
     else:
-        ceiling[-1]+=1
+        ceiling[-1] += 1
         ceiling = Version(".".join(map(str, ceiling)))
 
     # We do not want prereleases
@@ -160,8 +166,7 @@ def _check_pypi(package, current_version, target):
     return version
 
 
-def _print_new_version(path, target):
-
+def _print_new_version(path, target, drv_name_path):
     # Read the expression
     with open(path, 'r') as f:
         text = f.read()
@@ -182,13 +187,18 @@ def _print_new_version(path, target):
     elif Version(new_version) <= Version(version):
         raise ValueError("downgrade for {}.".format(pname))
 
-    # buildPython{Application,Package} will prefix the drv name with ${python.executable}
-    # python3.7 is going to work for most applications.
-    print(f"python3.7-{pname} {version} {new_version} {package_url}")
+    # to get cat and the pipes to work, I had to do shell=True
+    cmd = f"cat -- {drv_name_path} | grep {pname}-{version} | grep -v python2 | head -1"
+    drv_name_bytes = subprocess.check_output(cmd, shell=True)
+    # b"friture-0.37\n" -> "friture-0.37"
+    drv_name = drv_name_bytes.decode('utf-8').rstrip()
+    # "azure-mgmt-storge-0.37" -> "azure-mgmt-storge"
+    drv_name = "-".join(drv_name.split("-")[:-1])
+    if len(drv_name) > 0:
+        print(f"{drv_name} {version} {new_version} {package_url}")
 
 
-def _update(path, target):
-
+def _update(path, target, drv_name_path):
     # We need to read and modify a Nix expression.
     if os.path.isdir(path):
         path = os.path.join(path, 'default.nix')
@@ -204,43 +214,61 @@ def _update(path, target):
         return False
 
     try:
-        _print_new_version(path, target)
+        _print_new_version(path, target, drv_name_path)
         return True
     except ValueError as e:
         logging.warning("Path {}: {}".format(path, e))
         return False
 
 
-def main():
-
-    logging.info("########## BEGINNING OF NIXPKGS_UPDATE_PYPI_RELEASES ##########")
-    parser = argparse.ArgumentParser()
-    parser.add_argument('package', type=str, nargs='*', default=[])
-    parser.add_argument('--target', type=str, choices=SEMVER.keys(), default='major')
-    args = parser.parse_args()
-
-    packages = args.package
+def create_package_list(initial_packages: list):
+    logging.info("Creating pypi package list")
+    packages = initial_packages.copy()
     # also read packages from stdin
     if not sys.stdin.isatty():
         logging.info("Reading package paths from stdin")
         packages.extend(sys.stdin.read().split())
 
-    assert len(packages) > 0, "You must specify more than one package. Please list package paths as arguments or through stdin"
+    assert len(packages) > 0, \
+        "You must specify more than one package. Please list package paths as arguments or through stdin"
 
-    packages = list(map(os.path.abspath, packages))
+    return list(map(os.path.abspath, packages))
+
+
+def generate_drv_name_file(path):
+    logging.info(f"Creating drv name file at {path}")
+    file_contents = subprocess.check_output(shlex.split(f"nix-env -qa -f ."))
+    with open(path, 'w+') as f:
+        f.write(file_contents.decode('utf-8'))
+
+
+def main():
+    logging.info("########## BEGINNING OF NIXPKGS_UPDATE_PYPI_RELEASES ##########")
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('package', type=str, nargs='*', default=[])
+    parser.add_argument('--target', type=str, choices=SEMVER.keys(), default='major')
+    parser.add_argument('--drv-name-path', type=str, default=os.path.join(CACHE_HOME, "drv_names.txt"))
+    args = parser.parse_args()
+
+    generate_drv_name_file(args.drv_name_path)
+    packages = create_package_list(args.package)
 
     logging.info("Updating packages...")
 
+    def update_func(pkg):
+        return _update(pkg, target=args.target, drv_name_path=args.drv_name_path)
+
     # Use threads to update packages concurrently
+    # list is used to force evaluation of the generator
     with Pool() as p:
-        results = list(p.map(lambda pkg: _update(pkg, target=args.target), packages))
+        results = list(p.map(update_func, packages))
 
     logging.info("Finished updating packages.")
 
     count = sum(filter(bool, results))
     logging.info("Checked {} packages, {} updated".format(len(results), count))
     logging.info("########## END OF NIXPKGS_UPDATE_PYPI_RELEASES ##########")
-
 
 
 if __name__ == '__main__':
