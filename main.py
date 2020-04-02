@@ -190,10 +190,13 @@ def _print_new_version(path, target, drv_name_path):
     # to get cat and the pipes to work, I had to do shell=True
     cmd = f"cat -- {drv_name_path} | grep {pname}-{version} | grep -v python2 | head -1"
     drv_name_bytes = subprocess.check_output(cmd, shell=True)
+
     # b"friture-0.37\n" -> "friture-0.37"
     drv_name = drv_name_bytes.decode('utf-8').rstrip()
+
     # "azure-mgmt-storge-0.37" -> "azure-mgmt-storge"
     drv_name = "-".join(drv_name.split("-")[:-1])
+
     if len(drv_name) > 0:
         print(f"{drv_name} {version} {new_version} {package_url}")
 
