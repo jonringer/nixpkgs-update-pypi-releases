@@ -1,7 +1,7 @@
 let
   pkgs = import <nixpkgs> { };
 in {
-  inherit (pkgs) mkShell;
+  inherit pkgs;
   interpreter = pkgs.python3.withPackages(ps: with ps; [
     toolz requests
   ]);

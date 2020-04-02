@@ -1,7 +1,8 @@
-let
-  pkgs = import ./.;
-in
-with pkgs;
-mkShell {
-  buildInputs = [ interpreter ];
+with import <nixpkgs> {};
+
+with python3Packages;
+
+pkgs.mkShell {
+  buildInputs = [ requests venvShellHook ];
+  venvDir = "venv";
 }
