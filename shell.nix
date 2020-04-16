@@ -3,6 +3,6 @@ with import <nixpkgs> {};
 with python3Packages;
 
 pkgs.mkShell {
-  buildInputs = [ requests venvShellHook ];
+  buildInputs = [ packaging requests venvShellHook ];
   venvDir = "venv";
 }

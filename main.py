@@ -197,8 +197,10 @@ def _print_new_version(path, target, drv_name_path):
     # "azure-mgmt-storge-0.37" -> "azure-mgmt-storge"
     drv_name = "-".join(drv_name.split("-")[:-1])
 
-    if len(drv_name) > 0:
-        print(f"{drv_name} {version} {new_version} {package_url}")
+    if len(drv_name) == 0:
+        return False
+
+    print(f"{drv_name} {version} {new_version} {package_url}")
 
 
 def _update(path, target, drv_name_path):
@@ -238,9 +240,11 @@ def create_package_list(initial_packages: list):
     return list(map(os.path.abspath, packages))
 
 
-def generate_drv_name_file(path):
+def generate_drv_name_file(path: str):
     logging.info(f"Creating drv name file at {path}")
-    file_contents = subprocess.check_output(shlex.split(f"nix-env -qa -f ."))
+    cmd="nix-env -qa"
+    logging.info(f"Executing: {cmd}")
+    file_contents = subprocess.check_output(shlex.split(cmd))
     with open(path, 'w+') as f:
         f.write(file_contents.decode('utf-8'))
 
