@@ -240,9 +240,12 @@ def create_package_list(initial_packages: list):
     return list(map(os.path.abspath, packages))
 
 
-def generate_drv_name_file(path: str):
+def generate_drv_name_file(nixpkgs: str, path: str):
     logging.info(f"Creating drv name file at {path}")
-    cmd="nix-env -qa"
+    nixpkgs_arg = ''
+    if nixpkgs != '':
+        nixpkgs_arg = f"-f {nixpkgs} "
+    cmd=f"nix-env {nixpkgs_arg}-qa"
     logging.info(f"Executing: {cmd}")
     file_contents = subprocess.check_output(shlex.split(cmd))
     with open(path, 'w+') as f:
@@ -254,11 +257,12 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('package', type=str, nargs='*', default=[])
+    parser.add_argument('--nixpkgs', type=str, default='')
     parser.add_argument('--target', type=str, choices=SEMVER.keys(), default='major')
     parser.add_argument('--drv-name-path', type=str, default=os.path.join(CACHE_HOME, "drv_names.txt"))
     args = parser.parse_args()
 
-    generate_drv_name_file(args.drv_name_path)
+    generate_drv_name_file(args.nixpkgs, args.drv_name_path)
     packages = create_package_list(args.package)
 
     logging.info("Updating packages...")
